@@ -1,0 +1,205 @@
+import React, { useState, useEffect, useRef } from 'react';
+
+export default function App() {
+  const [currentTime, setCurrentTime] = useState(new Date());
+  const [isActive, setIsActive] = useState(false);
+  const [targetTime, setTargetTime] = useState(null);
+  const [countdownString, setCountdownString] = useState("00:00");
+  const [isAlarming, setIsAlarming] = useState(false);
+  
+  // Audio context ref to persist between renders
+  const audioContextRef = useRef(null);
+
+  // Initialize Audio Context (must be triggered by user interaction first)
+  const initAudio = () => {
+    if (!audioContextRef.current) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      audioContextRef.current = new AudioContext();
+    }
+    if (audioContextRef.current.state === 'suspended') {
+      audioContextRef.current.resume();
+    }
+  };
+
+  // Function to play a siren sound for 3 seconds
+  const playSiren = () => {
+    if (!audioContextRef.current) return;
+    
+    const ctx = audioContextRef.current;
+    const oscillator = ctx.createOscillator();
+    const gainNode = ctx.createGain();
+
+    oscillator.type = 'sawtooth';
+    oscillator.frequency.setValueAtTime(600, ctx.currentTime);
+    oscillator.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 0.5);
+    oscillator.frequency.linearRampToValueAtTime(600, ctx.currentTime + 1.0);
+    oscillator.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 1.5);
+    oscillator.frequency.linearRampToValueAtTime(600, ctx.currentTime + 2.0);
+    oscillator.frequency.linearRampToValueAtTime(1200, ctx.currentTime + 2.5);
+    oscillator.frequency.linearRampToValueAtTime(600, ctx.currentTime + 3.0);
+
+    gainNode.gain.setValueAtTime(0.3, ctx.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 3.0);
+
+    oscillator.connect(gainNode);
+    gainNode.connect(ctx.destination);
+
+    oscillator.start();
+    oscillator.stop(ctx.currentTime + 3.0);
+    
+    setIsAlarming(true);
+    setTimeout(() => {
+      setIsAlarming(false);
+      setIsActive(false); // Stop the countdown after alarm
+    }, 3000);
+  };
+
+  // Logic to find the next target time (XX:19:45 or XX:59:45)
+  const getNextTarget = (now) => {
+    const target1 = new Date(now);
+    target1.setMinutes(19, 45, 0);
+    
+    const target2 = new Date(now);
+    target2.setMinutes(59, 45, 0);
+
+    // If target1 is in the past, move to next hour
+    if (target1 <= now) {
+      target1.setHours(target1.getHours() + 1);
+    }
+    // If target2 is in the past, move to next hour
+    if (target2 <= now) {
+      target2.setHours(target2.getHours() + 1);
+    }
+
+    // Return whichever is closer
+    return target1 < target2 ? target1 : target2;
+  };
+
+  // Main Timer Effect
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now);
+
+      if (isActive && !isAlarming) {
+        // Calculate target if not already set or if passed
+        let target = targetTime;
+        if (!target || target <= now) {
+          target = getNextTarget(now);
+          setTargetTime(target);
+        }
+
+        // Calculate difference
+        const diff = target - now;
+
+        // Check if we hit the target (within 1 second buffer)
+        if (diff <= 1000 && diff > -1000) {
+           playSiren();
+        }
+
+        // Format countdown string
+        if (diff > 0) {
+          const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+          const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+          setCountdownString(`${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`);
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [isActive, targetTime, isAlarming]);
+
+  const toggleActive = () => {
+    initAudio(); // Ensure audio context is ready
+    if (!isActive) {
+      // Starting fresh
+      const now = new Date();
+      setTargetTime(getNextTarget(now));
+      setIsActive(true);
+    } else {
+      setIsActive(false);
+      setCountdownString("00:00");
+    }
+  };
+
+  // Format current time for display
+  const formatTime = (date) => {
+    return date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex flex-col items-center justify-between py-12 px-4 touch-none select-none">
+      
+      {/* Meta tags would go in index.html, simulating PWA behavior here visually */}
+      <style>{`
+        body { background-color: #111827; } 
+        /* Animation for the button press */
+        .push-effect:active {
+           transform: scale(0.95);
+           filter: brightness(0.8);
+        }
+        .glow-green {
+           text-shadow: 0 0 10px #22c55e, 0 0 20px #22c55e;
+        }
+      `}</style>
+
+      {/* --- HEADER TIME --- */}
+      <div className="flex flex-col items-center gap-2">
+        <h2 className="text-gray-400 text-sm uppercase tracking-widest font-semibold">Current Time</h2>
+        <div 
+          className={`text-6xl font-mono font-bold transition-colors duration-300 ${
+            isActive ? 'text-green-500 glow-green' : 'text-white'
+          }`}
+        >
+          {formatTime(currentTime)}
+        </div>
+      </div>
+
+      {/* --- MAIN BUTTON --- */}
+      <div className="flex-1 flex flex-col items-center justify-center w-full">
+        <button 
+          onClick={toggleActive}
+          className="relative group focus:outline-none transition-transform duration-100 ease-in-out push-effect rounded-full"
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+        >
+          {/* Indicator Ring */}
+          <div className={`absolute -inset-4 rounded-full border-4 border-dashed transition-all duration-1000 ${isActive ? 'border-green-500 animate-spin-slow opacity-100' : 'border-transparent opacity-0'}`}></div>
+          
+          {/* The User's Image */}
+          <div className="w-64 h-64 md:w-80 md:h-80 rounded-full overflow-hidden shadow-2xl border-8 border-gray-700 relative z-10">
+            {/* Using a placeholder if the specific file isn't found in this preview environment, 
+                but aiming for the specific file name provided */}
+            <img 
+              src="./Gemini_Generated_Image_77n3fc77n3fc77n3.jpg" 
+              alt="Go Button" 
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                e.target.onerror = null;
+                e.target.src = "https://via.placeholder.com/300/ff0000/ffffff?text=GO!"; // Fallback
+              }}
+            />
+            
+            {/* Overlay to simulate depth/gloss if needed, or visual feedback */}
+            <div className={`absolute inset-0 bg-black transition-opacity duration-200 ${isActive ? 'opacity-0' : 'opacity-10 pointer-events-none'}`}></div>
+          </div>
+        </button>
+
+        {/* Status Text */}
+        <p className="mt-8 text-gray-400 font-medium">
+          {isActive ? "SYSTEM ACTIVE" : "TAP TO ARM"}
+        </p>
+      </div>
+
+      {/* --- COUNTDOWN FOOTER --- */}
+      <div className={`flex flex-col items-center transition-opacity duration-500 ${isActive ? 'opacity-100' : 'opacity-0'}`}>
+        <div className="text-xl text-gray-400 mb-1">Time to Alarm</div>
+        <div className="text-5xl font-mono text-red-500 font-bold tracking-wider">
+          {isAlarming ? "ALARM!" : countdownString}
+        </div>
+        <div className="text-xs text-gray-600 mt-2">
+           Targets: XX:19:45 or XX:59:45
+        </div>
+      </div>
+    </div>
+  );
+}
